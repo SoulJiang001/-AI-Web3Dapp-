@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web3 分布式日记</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
+    <style>
+        /* CSS 样式：深色现代极简风 */
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --primary-color: #bb86fc;
+            --text-color: #e0e0e0;
+            --secondary-text: #a0a0a0;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 { margin: 0; font-size: 1.5rem; }
+
+        button {
+            background-color: var(--primary-color);
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+
+        .section-card {
+            background-color: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        /* 写日记区域 */
+        textarea {
+            width: 100%;
+            background-color: #2c2c2c;
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 80px;
+            box-sizing: border-box; /* 确保 padding 不撑大宽度 */
+            margin-bottom: 10px;
+            font-family: inherit;
+        }
+
+        textarea:focus { outline: 2px solid var(--primary-color); }
+
+        /* 日记列表区域 */
+        .diary-list { display: flex; flex-direction: column; gap: 15px; }
+        
+        .diary-item {
+            background-color: #2c2c2c;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .diary-content { font-size: 1rem; margin-bottom: 8px; line-height: 1.5; }
+        .diary-author { font-size: 0.8rem; color: var(--secondary-text); word-break: break-all; }
+
+        #walletAddress { font-family: monospace; color: var(--secondary-text); }
+        .status-msg { font-size: 0.9rem; margin-top: 5px; color: var(--primary-color); min-height: 20px;}
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Web3 Diary</h1>
+            <div id="walletInfo">
+                <button id="connectBtn" onclick="connectWallet()">连接钱包</button>
+                <span id="walletAddress" style="display: none;"></span>
+            </div>
+        </header>
+
+        <div class="section-card">
+            <h3>✍️ 写日记</h3>
+            <textarea id="diaryInput" placeholder="今天发生了什么？(写入区块链永久保存)"></textarea>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <button id="writeBtn" onclick="writeDiary()" disabled>提交上链</button>
+                <div id="writeStatus" class="status-msg"></div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h3>📖 日记列表</h3>
+            <div id="diaryList" class="diary-list">
+                <div style="text-align: center; color: #777;">请先连接钱包以读取数据...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 配置合约信息
+        const CONTRACT_ADDRESS = "0x117500dE17DE2700A7bEAC2f27e3B056C96c7E24";
+        const ABI = [
+            {"inputs":[],"stateMutability":"nonpayable","type":"constructor"},
+            {"inputs":[],"name":"clearDiary","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+            {"inputs":[],"name":"readDiary","outputs":[{"components":[{"internalType":"string","name":"content","type":"string"},{"internalType":"address","name":"author","type":"address"}],"internalType":"struct DiaryContract.DiaryEntry[]","name":"","type":"tuple[]"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"string","name":"_content","type":"string"}],"name":"writeDiary","outputs":[],"stateMutability":"nonpayable","type":"function"}
+        ];
+
+        // 全局变量
+        let provider;
+        let signer;
+        let contract;
+
+        // 2. 连接钱包功能
+        async function connectWallet() {
+            if (!window.ethereum) {
+                alert("请安装 MetaMask 钱包！");
+                return;
+            }
+
+            try {
+                // 初始化 Provider (Ethers v6 写法)
+                provider = new ethers.BrowserProvider(window.ethereum);
+                
+                // 请求用户授权
+                await provider.send("eth_requestAccounts", []);
+                
+                // 获取 Signer (签名者，用于发送交易)
+                signer = await provider.getSigner();
+                const address = await signer.getAddress();
+
+                // 检查并切换到 Sepolia 网络
+                await checkNetwork();
+
+                // 初始化合约实例
+                contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+                // 更新 UI
+                document.getElementById("connectBtn").style.display = "none";
+                const addrDisplay = document.getElementById("walletAddress");
+                addrDisplay.innerText = address.slice(0,6) + "..." + address.slice(-4);
+                addrDisplay.style.display = "block";
+                document.getElementById("writeBtn").disabled = false;
+
+                // 自动加载日记
+                loadDiaries();
+
+            } catch (error) {
+                console.error("连接失败:", error);
+                alert("连接钱包失败，请查看控制台");
+            }
+        }
+
+        // 辅助：确保用户在 Sepolia 测试网
+        async function checkNetwork() {
+            const network = await provider.getNetwork();
+            // Sepolia Chain ID 是 11155111 (十六进制 0xaa36a7)
+            if (network.chainId !== 11155111n) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '0xaa36a7' }],
+                    });
+                } catch (err) {
+                    alert("请在 MetaMask 中切换到 Sepolia 测试网！");
+                }
+            }
+        }
+
+        // 3. 读取日记功能
+        async function loadDiaries() {
+            const listDiv = document.getElementById("diaryList");
+            listDiv.innerHTML = '<div style="text-align: center; color: #777;">正在从区块链读取数据...</div>';
+
+            try {
+                // 调用合约 readDiary 函数
+                const diaries = await contract.readDiary();
+                
+                // 清空列表
+                listDiv.innerHTML = "";
+
+                if (diaries.length === 0) {
+                    listDiv.innerHTML = '<div style="text-align: center; color: #777;">暂无日记，快来写第一篇吧！</div>';
+                    return;
+                }
+
+                // 遍历数据并渲染 (倒序显示，最新的在最上面)
+                // Ethers v6 返回的是 Proxy 对象，可以像数组一样遍历
+                [...diaries].reverse().forEach(entry => {
+                    const content = entry.content; // 对应结构体 content
+                    const author = entry.author;   // 对应结构体 author
+
+                    const itemHtml = `
+                        <div class="diary-item">
+                            <div class="diary-content">${escapeHtml(content)}</div>
+                            <div class="diary-author">Author: ${author}</div>
+                        </div>
+                    `;
+                    listDiv.innerHTML += itemHtml;
+                });
+
+            } catch (error) {
+                console.error("读取失败:", error);
+                listDiv.innerHTML = '<div style="color: red; text-align: center;">读取失败，请确保已连接 Sepolia 网络</div>';
+            }
+        }
+
+        // 4. 写日记功能
+        async function writeDiary() {
+            const input = document.getElementById("diaryInput");
+            const content = input.value.trim();
+            const statusDiv = document.getElementById("writeStatus");
+            const btn = document.getElementById("writeBtn");
+
+            if (!content) return alert("内容不能为空");
+
+            try {
+                btn.disabled = true;
+                statusDiv.innerText = "⏳ 正在请求钱包签名...";
+
+                // 调用合约 writeDiary 函数
+                const tx = await contract.writeDiary(content);
+                
+                statusDiv.innerText = "🚀 交易已发送，等待区块确认...";
+                
+                // 等待交易上链确认
+                await tx.wait();
+
+                statusDiv.innerText = "✅ 写入成功！";
+                input.value = ""; // 清空输入框
+                
+                // 重新加载列表
+                setTimeout(() => {
+                    statusDiv.innerText = "";
+                    loadDiaries();
+                }, 2000);
+
+            } catch (error) {
+                console.error("写入失败:", error);
+                statusDiv.innerText = "❌ 写入失败";
+                if(error.code === 'ACTION_REJECTED') {
+                    alert("你拒绝了交易签名");
+                }
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // 简单的防 XSS 处理
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
