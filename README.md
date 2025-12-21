@@ -29,7 +29,7 @@
 ## ⛓ Contract Info (合约信息)
 
 - **Network**: Sepolia Testnet
-- **Address**: `[你的合约地址 0x...]`
+- **Address**: `[0x117500de17de2700a7beac2f27e3b056c96c7e24]`
 - **Status**: ✅ Source Code Verified
 
 
