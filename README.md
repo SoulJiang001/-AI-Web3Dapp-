@@ -37,4 +37,4 @@
 
 1. Clone the repo:
    ```bash
-   git clone [https://github.com/](https://github.com/)[你的GitHub用户名]/Gemini-Web3.git
+   git clone [https://github.com/](https://github.com/)[SoulJiang001]/Gemini-Web3.git
